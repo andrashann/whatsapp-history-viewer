@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The page may only talk to the server it came from, so chat data cannot be sent elsewhere. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; form-action 'none'; base-uri 'none'">
+<title>WhatsApp chat viewer</title>
+<style>
+:root {
+  --bg: #f0f2f5;
+  --panel: #ffffff;
+  --border: #e1e0d9;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --chat-bg: #efeae2;
+  --bubble: #ffffff;
+  --bubble-me: #d9fdd3;
+  --system: #fdf6d8;
+  --link: #1565c0;
+  --hover: #f3f3f1;
+  --active: #e9e9e6;
+  --name-l: 36%;
+  --shadow: 0 1px 1px rgba(0, 0, 0, .13);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b141a;
+    --panel: #111b21;
+    --border: #26343c;
+    --ink: #e9edef;
+    --ink-2: #aebac1;
+    --muted: #8696a0;
+    --chat-bg: #0b141a;
+    --bubble: #202c33;
+    --bubble-me: #005c4b;
+    --system: #182229;
+    --link: #53bdeb;
+    --hover: #1a262d;
+    --active: #2a3942;
+    --name-l: 70%;
+    --shadow: 0 1px 1px rgba(0, 0, 0, .4);
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  display: flex;
+  overflow: hidden;
+}
+a { color: var(--link); }
+
+/* Sidebar */
+#sidebar {
+  width: 340px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+#sidebar h1 {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 18px; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+button.primary, button.secondary { font: inherit; border-radius: 8px; cursor: pointer; }
+button.primary { font-weight: 600; color: #fff; background: #008069; border: 0; padding: 10px 20px; }
+button.secondary { font-size: 13px; color: var(--ink); background: none; border: 1px solid var(--border); padding: 6px 12px; }
+button.secondary:hover { background: var(--hover); }
+#chats { flex: 1; overflow-y: auto; list-style: none; margin: 0; padding: 0; }
+#chats li {
+  display: flex; gap: 12px; align-items: center;
+  padding: 10px 16px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+#chats li:hover { background: var(--hover); }
+#chats li.active { background: var(--active); }
+.avatar {
+  width: 44px; height: 44px; flex: none; border-radius: 50%;
+  display: grid; place-items: center;
+  font-weight: 600; font-size: 17px; color: #fff;
+  background: hsl(var(--h) 45% 45%);
+}
+.chat-info { min-width: 0; flex: 1; }
+.chat-top { display: flex; gap: 8px; align-items: baseline; }
+.chat-title { flex: 1; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-date { flex: none; font-size: 12px; color: var(--muted); }
+.chat-preview { font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#me-row[hidden] { display: none; }
+#me-row { padding: 10px 16px; border-top: 1px solid var(--border); font-size: 13px; color: var(--ink-2); display: flex; gap: 8px; align-items: center; }
+#me-row select { flex: 1; min-width: 0; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px; }
+
+/* Chat pane */
+#main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--chat-bg); }
+#header {
+  display: flex; gap: 12px; align-items: center;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+#header:empty { display: none; }
+#back { display: none; border: 0; background: none; color: var(--ink); font-size: 22px; cursor: pointer; padding: 0 4px; }
+.header-title { font-weight: 600; }
+.header-sub { font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#messages { flex: 1; overflow-y: auto; padding: 12px max(16px, calc((100% - 900px) / 2)) 24px; }
+.placeholder { margin: 20vh auto 0; max-width: 460px; text-align: center; color: var(--ink-2); }
+.placeholder h2 { font-size: 20px; color: var(--ink); margin: 0 0 8px; }
+.placeholder .warn { color: #d03b3b; }
+.placeholder .actions { display: flex; flex-direction: column; gap: 12px; align-items: center; margin-top: 20px; }
+body.dragging #main { outline: 3px dashed #008069; outline-offset: -10px; }
+
+.day, .sys { display: flex; justify-content: center; margin: 10px 0; }
+.day span, .sys span {
+  font-size: 12.5px; color: var(--ink-2); text-align: center;
+  padding: 4px 10px; border-radius: 8px; box-shadow: var(--shadow); max-width: 85%;
+}
+.day span { background: var(--panel); position: relative; }
+.sys span { background: var(--system); }
+
+.msg { display: flex; margin-top: 2px; }
+.msg.first { margin-top: 10px; }
+.msg.me { justify-content: flex-end; }
+.bubble {
+  max-width: min(75%, 560px);
+  padding: 6px 9px 4px;
+  border-radius: 8px;
+  background: var(--bubble);
+  box-shadow: var(--shadow);
+  overflow-wrap: anywhere;
+}
+.msg.me .bubble { background: var(--bubble-me); }
+.msg.sticker .bubble { background: none; box-shadow: none; }
+.sender { font-size: 13px; font-weight: 600; color: hsl(var(--h) 60% var(--name-l)); }
+.text { white-space: pre-wrap; }
+.text code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+.note { font-style: italic; color: var(--muted); }
+.meta { float: right; margin: 4px 0 0 12px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.bubble::after { content: ""; display: block; clear: both; }
+
+.media { display: block; margin: 0 -4px 4px; }
+.media img, .media video {
+  display: block; max-width: 100%; max-height: 420px; border-radius: 6px;
+  background: rgba(128, 128, 128, .15);
+}
+.media img { min-width: 60px; min-height: 60px; cursor: zoom-in; }
+.msg.sticker .media img { max-height: 140px; background: none; cursor: default; }
+.media audio { display: block; width: 300px; max-width: 100%; }
+.file {
+  display: flex; gap: 10px; align-items: center;
+  padding: 8px 10px; margin-bottom: 4px; border-radius: 6px;
+  background: rgba(128, 128, 128, .13); color: inherit; text-decoration: none;
+}
+.file:hover { background: rgba(128, 128, 128, .22); }
+.file-ext {
+  flex: none; min-width: 40px; padding: 8px 4px; border-radius: 4px; text-align: center;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; color: #fff; background: #898781;
+}
+.file-name { font-size: 14px; }
+.file.missing { opacity: .7; }
+
+.poll-q { font-weight: 600; margin-bottom: 6px; }
+.poll-opt { margin-bottom: 8px; min-width: 240px; }
+.poll-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.poll-bar { height: 6px; margin-top: 3px; border-radius: 3px; background: rgba(128, 128, 128, .22); }
+.poll-bar i { display: block; height: 100%; border-radius: 3px; background: #1baf7a; }
+
+#lightbox { border: 0; padding: 0; background: none; max-width: 100vw; max-height: 100vh; }
+#lightbox::backdrop { background: rgba(0, 0, 0, .88); }
+#lightbox img { display: block; max-width: 96vw; max-height: 96vh; cursor: zoom-out; }
+
+@media (max-width: 720px) {
+  #sidebar { width: 100%; border-right: 0; }
+  #main { display: none; }
+  body.open #sidebar { display: none; }
+  body.open #main { display: flex; }
+  #back { display: block; }
+  .bubble { max-width: 88%; }
+}
+</style>
+</head>
+<body>
+<aside id="sidebar">
+  <h1>Chats <button class="secondary" id="open-folder">Open folder</button></h1>
+  <ul id="chats"></ul>
+  <label id="me-row" hidden>I am <select id="me"></select></label>
+</aside>
+<main id="main">
+  <div id="header"></div>
+  <div id="messages"><div class="placeholder">Looking for chats…</div></div>
+</main>
+<dialog id="lightbox"><img alt=""></dialog>
+<input type="file" id="picker" webkitdirectory multiple hidden>
+
+<script>
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+};
+const nfc = (s) => s.normalize('NFC');
+const hue = (s) => {
+  let h = 0;
+  for (const ch of s) h = (h * 31 + ch.codePointAt(0)) % 360;
+  return h;
+};
+
+// ---------- Discovery: read the server's directory listings ----------
+
+// Works with any server that renders a directory as an HTML page of links
+// (npx serve, python -m http.server, ...).
+async function listDir(url) {
+  const res = await fetch(url, { headers: { Accept: 'text/html' } });
+  if (!res.ok) throw new Error(`${res.status} for ${url}`);
+  const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
+  const base = new URL(url, location.href);
+  const seen = new Set();
+  const entries = [];
+  for (const a of doc.querySelectorAll('a[href]')) {
+    let u;
+    try { u = new URL(a.getAttribute('href'), base); } catch { continue; }
+    if (u.origin !== base.origin || !u.pathname.startsWith(base.pathname)) continue;
+    const rest = u.pathname.slice(base.pathname.length);
+    const seg = rest.replace(/\/$/, '');
+    if (!seg || seg.includes('/') || seen.has(seg)) continue;
+    seen.add(seg);
+    let name;
+    try { name = decodeURIComponent(seg); } catch { name = seg; }
+    const isDir = rest.endsWith('/') || a.classList.contains('folder') || !/\.[A-Za-z0-9]{1,5}$/.test(name);
+    entries.push({ name, isDir, url: base.origin + base.pathname + seg + (isDir ? '/' : '') });
+  }
+  return entries;
+}
+
+// Chat folders under `root`: from manifest.json when there is one (for hosts
+// that do not list folders), otherwise from the server's folder listing.
+async function serverDirs(root) {
+  try {
+    const res = await fetch(root + 'manifest.json');
+    if (res.ok) {
+      const { chats } = await res.json();
+      return Object.entries(chats).map(([name, files]) => {
+        const url = root + encodeURIComponent(name) + '/';
+        return { name, url, entries: files.map((f) => ({ name: f, isDir: false, url: url + encodeURIComponent(f) })) };
+      });
+    }
+  } catch { /* no usable manifest, fall through to the listing */ }
+  return (await listDir(root)).filter((e) => e.isDir);
+}
+
+async function loadChat(dir) {
+  let entries = dir.entries;
+  if (!entries) {
+    try { entries = await listDir(dir.url); } catch { return null; }
+  }
+  const txts = entries.filter((e) => !e.isDir && /\.txt$/i.test(e.name));
+  if (!txts.length) return null;
+  const txt = txts.find((e) => /whatsapp|_chat/i.test(e.name)) || txts[0];
+  const files = new Map(entries.filter((e) => !e.isDir).map((e) => [nfc(e.name), { url: e.url }]));
+  const res = await fetch(txt.url);
+  if (!res.ok) return null;
+  const messages = parseChat(await res.text(), files);
+  return messages.length ? buildChat(dir.name, dir.name, messages) : null;
+}
+
+function buildChat(id, name, messages) {
+  const title = name.replace(/^WhatsApp Chat with /i, '').replace(/^WhatsApp Chat - /i, '').trim() || name;
+  const senders = new Map();
+  for (const m of messages) if (m.sender) senders.set(m.sender, (senders.get(m.sender) || 0) + 1);
+  const isGroup = senders.size > 2 || messages.some((m) => !m.sender && /created group|added you/.test(m.text));
+  const last = [...messages].reverse().find((m) => m.sender) || messages[messages.length - 1];
+  return { id, title, messages, senders, isGroup, last };
+}
+
+// ---------- Discovery: a folder picked on this device ----------
+
+// The three ways to pick a folder (directory picker, folder input, drag and
+// drop) all reduce to a flat list of { path: [segments], file: File }.
+const MAX_DEPTH = 4;
+const MAX_TXT_BYTES = 100 * 1024 * 1024;
+
+async function walkHandle(handle, path = [handle.name]) {
+  const out = [];
+  if (path.length > MAX_DEPTH) return out;
+  for await (const child of handle.values()) {
+    if (child.kind === 'file') out.push({ path: [...path, child.name], file: await child.getFile() });
+    else out.push(...await walkHandle(child, [...path, child.name]));
+  }
+  return out;
+}
+
+async function walkEntry(entry, depth = 1) {
+  if (entry.isFile) {
+    const file = await new Promise((ok, fail) => entry.file(ok, fail));
+    return [{ path: entry.fullPath.split('/').filter(Boolean), file }];
+  }
+  if (depth > MAX_DEPTH) return [];
+  const reader = entry.createReader();
+  const out = [];
+  for (;;) {
+    const batch = await new Promise((ok, fail) => reader.readEntries(ok, fail));
+    if (!batch.length) break;
+    for (const child of batch) out.push(...await walkEntry(child, depth + 1));
+  }
+  return out;
+}
+
+// Any folder holding a parseable chat .txt is a chat, wherever it sits in the
+// selection, so picking one chat folder or the parent of many both work.
+async function loadLocal(entries) {
+  const byDir = new Map();
+  for (const e of entries) {
+    const dir = e.path.slice(0, -1).join('/');
+    if (!byDir.has(dir)) byDir.set(dir, []);
+    byDir.get(dir).push(e);
+  }
+  const chats = [];
+  for (const [dir, list] of byDir) {
+    const files = new Map(list.map((e) => [nfc(e.path[e.path.length - 1]), { file: e.file }]));
+    for (const txt of list) {
+      if (!/\.txt$/i.test(txt.file.name) || txt.file.size > MAX_TXT_BYTES) continue;
+      const messages = parseChat(await txt.file.text(), files);
+      if (!messages.length) continue;
+      chats.push(buildChat(dir, dir.split('/').pop() || txt.file.name.replace(/\.txt$/i, ''), messages));
+      break;
+    }
+  }
+  return chats;
+}
+
+// Local files are shown through object URLs, made when a chat opens and
+// released when the next one does.
+const blobUrls = [];
+const MIME = { opus: 'audio/ogg', oga: 'audio/ogg' };
+
+function urlFor(att) {
+  if (att.ref.url) return att.ref.url;
+  let file = att.ref.file;
+  if (!file.type && MIME[att.ext]) file = file.slice(0, file.size, MIME[att.ext]);
+  const url = URL.createObjectURL(file);
+  blobUrls.push(url);
+  return url;
+}
+
+// The picked folder is remembered where the browser supports it (Chrome, Edge).
+function idb(mode, run) {
+  return new Promise((ok, fail) => {
+    const open = indexedDB.open('wa-viewer', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('kv');
+    open.onerror = () => fail(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction('kv', mode);
+      const req = run(tx.objectStore('kv'));
+      tx.oncomplete = () => ok(req.result);
+      tx.onerror = () => fail(tx.error);
+    };
+  });
+}
+const saveHandle = (handle) => idb('readwrite', (s) => s.put(handle, 'folder')).catch(() => {});
+const loadHandle = () => idb('readonly', (s) => s.get('folder')).catch(() => null);
+
+// ---------- Parsing ----------
+
+// Android: "3/3/26, 20:21 - Name: text"; iOS: "[03/03/2026, 20:21:05] Name: text"
+const HEAD = /^[‎‏﻿]*(\[)?(\d{1,4})([\/.\-])(\d{1,2})\3(\d{1,4}),?\s(\d{1,2}[:.]\d{2}(?:[:.]\d{2})?(?:[\s ]*[AaPp]\.?\s?[Mm]\.?)?)(?:\]\s|\s-\s)([\s\S]*)$/;
+
+const KIND = {
+  jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', webp: 'image', avif: 'image', bmp: 'image',
+  mp4: 'video', m4v: 'video', mov: 'video', webm: 'video', '3gp': 'video',
+  opus: 'audio', ogg: 'audio', oga: 'audio', mp3: 'audio', m4a: 'audio', aac: 'audio', wav: 'audio',
+};
+
+function parseChat(raw, files) {
+  const messages = [];
+  let cur = null;
+  for (const line of raw.replace(/\r\n?/g, '\n').split('\n')) {
+    const m = HEAD.exec(line);
+    if (!m) {
+      if (cur) cur.text += '\n' + line;
+      continue;
+    }
+    cur = { a: +m[2], sep: m[3], b: +m[4], c: +m[5], aLen: m[2].length, time: m[6].replace(/ /g, ' '), sender: null, text: m[7] };
+    const who = /^([^:]+?):(?: ([\s\S]*))?$/.exec(m[7]);
+    if (who) { cur.sender = who[1].trim(); cur.text = who[2] || ''; }
+    messages.push(cur);
+  }
+
+  // Decide day/month order once per chat from the values that disambiguate it.
+  const dayFirst = messages.some((x) => x.aLen < 3 && x.a > 12) ? true
+    : messages.some((x) => x.b > 12) ? false
+    : messages[0] ? messages[0].sep !== '/' : false;
+
+  for (const x of messages) {
+    let y, mo, d;
+    if (x.aLen === 4) [y, mo, d] = [x.a, x.b, x.c];
+    else [d, mo, y] = dayFirst ? [x.a, x.b, x.c] : [x.b, x.a, x.c];
+    if (y < 100) y += 2000;
+    x.date = new Date(y, mo - 1, d);
+    x.text = x.text.replace(/\s+$/, '');
+    classify(x, files);
+  }
+  return messages.filter((x) => x.text || x.attachment || x.poll || x.note);
+}
+
+function classify(x, files) {
+  if (!x.sender) return;
+  const edited = / ?<This message was edited>$/;
+  if (edited.test(x.text)) { x.edited = true; x.text = x.text.replace(edited, ''); }
+
+  if (/^<Media omitted>$/i.test(x.text)) { x.note = 'Media not included in export'; x.text = ''; return; }
+  if (/^(This message was deleted|You deleted this message)\.?$/.test(x.text)) { x.note = x.text; x.text = ''; return; }
+
+  if (x.text.startsWith('POLL:\n')) {
+    const lines = x.text.split('\n').slice(1);
+    const options = [];
+    const question = [];
+    for (const l of lines) {
+      const o = /^OPTION: (.*?) \((\d+) votes?\)$/.exec(l);
+      if (o) options.push({ label: o[1], votes: +o[2] });
+      else if (!options.length) question.push(l);
+    }
+    if (options.length) { x.poll = { question: question.join('\n'), options }; x.text = ''; return; }
+  }
+
+  const nl = x.text.indexOf('\n');
+  const first = (nl < 0 ? x.text : x.text.slice(0, nl)).replace(/[‎‏]/g, '');
+  // The last pattern covers localized exports, and only counts when the file exists.
+  const localized = /^(.+\.\w{2,5}) \([^()]+\)$/.exec(first);
+  const att = /^(.+?) \(file attached\)$/.exec(first) || /^<attached: (.+?)>$/.exec(first)
+    || (localized && files.has(nfc(localized[1])) ? localized : null);
+  if (att) {
+    const name = att[1];
+    const ext = (/\.(\w+)$/.exec(name) || [, ''])[1].toLowerCase();
+    x.attachment = { name, ext, kind: KIND[ext] || 'file', ref: files.get(nfc(name)) || null };
+    let caption = nl < 0 ? '' : x.text.slice(nl + 1);
+    // Documents repeat their own file name as the caption.
+    if (caption.trim() === name.replace(/\.\w+$/, '').trim()) caption = '';
+    x.text = caption;
+  }
+}
+
+// ---------- Rendering ----------
+
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function inlineMarks(s) {
+  let h = esc(s);
+  h = h.replace(/```([\s\S]+?)```/g, '<code>$1</code>');
+  for (const [ch, tag] of [['\\*', 'b'], ['_', 'i'], ['~', 's']]) {
+    const re = new RegExp(`(^|[^\\p{L}\\p{N}${ch}])${ch}(?=\\S)([^${ch}\\n]*?\\S)${ch}(?![\\p{L}\\p{N}])`, 'gu');
+    h = h.replace(re, `$1<${tag}>$2</${tag}>`);
+  }
+  return h;
+}
+
+function formatText(text) {
+  const frag = document.createDocumentFragment();
+  const parts = text.split(/(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g);
+  parts.forEach((part, i) => {
+    if (!part) return;
+    if (i % 2) {
+      const a = el('a', null, part);
+      a.href = part; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      frag.append(a);
+    } else {
+      const span = el('span');
+      span.innerHTML = inlineMarks(part);
+      frag.append(span);
+    }
+  });
+  return frag;
+}
+
+function renderAttachment(att) {
+  if (!att.ref) {
+    const box = el('div', 'file missing');
+    box.append(el('span', 'file-ext', att.ext || '?'), el('span', 'file-name', `${att.name} (file not in folder)`));
+    return box;
+  }
+  if (att.kind === 'file') {
+    const a = el('a', 'file');
+    a.href = urlFor(att); a.target = '_blank'; a.rel = 'noopener';
+    // An object URL has no file name, so anything the browser cannot display is saved under its own.
+    if (att.ref.file && att.ext !== 'pdf') a.download = att.name;
+    a.append(el('span', 'file-ext', att.ext || 'file'), el('span', 'file-name', att.name));
+    return a;
+  }
+  const wrap = el('div', 'media');
+  let node;
+  if (att.kind === 'image') {
+    node = el('img');
+    node.loading = 'lazy';
+    node.alt = att.name;
+  } else {
+    node = el(att.kind);
+    node.controls = true;
+    node.preload = 'metadata';
+  }
+  node.src = urlFor(att);
+  wrap.append(node);
+  return wrap;
+}
+
+function renderPoll(poll) {
+  const box = el('div', 'poll');
+  box.append(el('div', 'poll-q', poll.question));
+  const max = Math.max(1, ...poll.options.map((o) => o.votes));
+  for (const o of poll.options) {
+    const opt = el('div', 'poll-opt');
+    const row = el('div', 'poll-row');
+    row.append(el('span', null, o.label), el('span', null, String(o.votes)));
+    const bar = el('div', 'poll-bar');
+    const fill = el('i');
+    fill.style.width = `${(o.votes / max) * 100}%`;
+    bar.append(fill);
+    opt.append(row, bar);
+    box.append(opt);
+  }
+  return box;
+}
+
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+function renderMessages(chat) {
+  const frag = document.createDocumentFragment();
+  let lastDay = null;
+  let lastSender = null;
+  for (const m of chat.messages) {
+    const day = m.date.toDateString();
+    if (day !== lastDay) {
+      const sep = el('div', 'day');
+      sep.append(el('span', null, isNaN(m.date) ? 'Unknown date' : dayFmt.format(m.date)));
+      frag.append(sep);
+      lastDay = day;
+      lastSender = null;
+    }
+    if (!m.sender) {
+      const sys = el('div', 'sys');
+      const span = el('span');
+      span.append(formatText(m.text));
+      sys.append(span);
+      frag.append(sys);
+      lastSender = null;
+      continue;
+    }
+    const isMe = m.sender === state.me;
+    const row = el('div', 'msg' + (isMe ? ' me' : '') + (m.sender !== lastSender ? ' first' : ''));
+    const bubble = el('div', 'bubble');
+    if (chat.isGroup && !isMe && m.sender !== lastSender) {
+      const name = el('div', 'sender', m.sender);
+      name.style.setProperty('--h', hue(m.sender));
+      bubble.append(name);
+    }
+    if (m.attachment) {
+      if (/^STK-/.test(m.attachment.name) && m.attachment.ref && !m.text) row.classList.add('sticker');
+      bubble.append(renderAttachment(m.attachment));
+    }
+    if (m.poll) bubble.append(renderPoll(m.poll));
+    if (m.note) bubble.append(el('span', 'note', m.note));
+    if (m.text) {
+      const text = el('span', 'text');
+      text.append(formatText(m.text));
+      bubble.append(text);
+    }
+    bubble.append(el('span', 'meta', (m.edited ? 'edited ' : '') + m.time));
+    row.append(bubble);
+    frag.append(row);
+    lastSender = m.sender;
+  }
+  return frag;
+}
+
+function preview(m) {
+  if (!m) return '';
+  if (m.attachment) {
+    const label = { image: '📷 Photo', video: '🎥 Video', audio: '🎤 Audio' }[m.attachment.kind] || `📄 ${m.attachment.name}`;
+    return m.text ? `${label}: ${m.text}` : label;
+  }
+  if (m.poll) return `📊 ${m.poll.question}`;
+  // Drop the *bold*, _italic_, and ~strike~ markers, which the one-line preview does not render.
+  return (m.text || m.note || '').split('\n')[0]
+    .replace(/(^|\s)[*_~](?=\S)/g, '$1').replace(/(\S)[*_~](?=\s|[.,!?]|$)/g, '$1');
+}
+
+function shortDate(d) {
+  if (isNaN(d)) return '';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// ---------- App state ----------
+
+const state = { chats: [], me: null, current: null, pinned: false, savedHandle: null, hasSamples: false };
+
+function renderSidebar() {
+  const list = $('chats');
+  list.replaceChildren();
+  for (const chat of state.chats) {
+    const li = el('li', chat === state.current ? 'active' : '');
+    const avatar = el('div', 'avatar', [...chat.title][0]?.toUpperCase() || '?');
+    avatar.style.setProperty('--h', hue(chat.title));
+    const info = el('div', 'chat-info');
+    const top = el('div', 'chat-top');
+    top.append(el('span', 'chat-title', chat.title), el('span', 'chat-date', shortDate(chat.last.date)));
+    const who = chat.isGroup && chat.last.sender ? `${chat.last.sender === state.me ? 'You' : chat.last.sender}: ` : '';
+    info.append(top, el('div', 'chat-preview', who + preview(chat.last)));
+    li.append(avatar, info);
+    li.addEventListener('click', () => { location.hash = encodeURIComponent(chat.id); });
+    list.append(li);
+  }
+}
+
+// What the chat pane shows when no chat is open.
+function welcome(note) {
+  const wrap = el('div', 'placeholder');
+  if (note) wrap.append(el('p', 'warn', note));
+  if (state.chats.length) {
+    wrap.append(el('p', null, 'Select a chat to read it.'));
+    return wrap;
+  }
+  wrap.append(
+    el('h2', null, 'Read your exported WhatsApp chats'),
+    el('p', null, 'Choose the folder that holds your exported chat folders, or drop it anywhere on this page. '
+      + 'The files are read by your browser on this device and are not uploaded.'),
+  );
+  const actions = el('div', 'actions');
+  const pick = el('button', 'primary', 'Choose folder');
+  pick.addEventListener('click', pickFolder);
+  actions.append(pick);
+  if (state.savedHandle) {
+    const again = el('button', 'secondary', `Reopen “${state.savedHandle.name}”`);
+    again.addEventListener('click', reopenFolder);
+    actions.append(again);
+  }
+  if (state.hasSamples) {
+    const samples = el('button', 'secondary', 'View sample chats');
+    samples.addEventListener('click', () => { location.search = '?dir=samples'; });
+    actions.append(samples);
+  }
+  wrap.append(actions);
+  return wrap;
+}
+
+function openChat(chat, note) {
+  state.current = chat;
+  // On a phone the chat pane is hidden behind the list, so show it when the list is empty.
+  document.body.classList.toggle('open', !!chat || !state.chats.length);
+  for (const url of blobUrls.splice(0)) URL.revokeObjectURL(url);
+  renderSidebar();
+  const header = $('header');
+  const box = $('messages');
+  header.replaceChildren();
+  if (!chat) {
+    box.replaceChildren(welcome(note));
+    document.title = 'WhatsApp chat viewer';
+    return;
+  }
+  document.title = chat.title;
+  const back = el('button', null, '←');
+  back.id = 'back';
+  back.title = 'Back to chats';
+  back.addEventListener('click', () => { location.hash = ''; });
+  const info = el('div', 'chat-info');
+  const first = chat.messages[0].date, last = chat.last.date;
+  const sub = chat.isGroup
+    ? [...chat.senders.keys()].map((s) => (s === state.me ? 'You' : s)).join(', ')
+    : `${chat.messages.filter((m) => m.sender).length} messages, ${shortDate(first)} – ${shortDate(last)}`;
+  info.append(el('div', 'header-title', chat.title), el('div', 'header-sub', sub));
+  const avatar = el('div', 'avatar', [...chat.title][0]?.toUpperCase() || '?');
+  avatar.style.setProperty('--h', hue(chat.title));
+  header.append(back, avatar, info);
+
+  box.replaceChildren(renderMessages(chat));
+  // Start at the newest message and stay there while lazy media loads above it.
+  state.pinned = true;
+  box.scrollTop = box.scrollHeight;
+}
+
+function route() {
+  let id = '';
+  try { id = decodeURIComponent(location.hash.slice(1)); } catch { /* ignore a malformed hash */ }
+  openChat(state.chats.find((c) => c.id === id) || null);
+}
+
+function setupMe() {
+  // Exports do not say whose phone they came from. Guess the sender who
+  // appears in the most chats, and let the user override it.
+  const tally = new Map();
+  for (const chat of state.chats) {
+    for (const [name, count] of chat.senders) {
+      const t = tally.get(name) || { chats: 0, msgs: 0 };
+      t.chats += 1; t.msgs += count;
+      tally.set(name, t);
+    }
+  }
+  const names = [...tally.keys()].sort((x, y) => tally.get(y).chats - tally.get(x).chats || tally.get(y).msgs - tally.get(x).msgs);
+  let saved = null;
+  try { saved = localStorage.getItem('wa-viewer-me'); } catch { /* storage unavailable */ }
+  state.me = saved !== null && (saved === '' || tally.has(saved)) ? saved : names[0] || '';
+
+  const select = $('me');
+  select.replaceChildren(new Option('(nobody)', ''));
+  for (const name of names) select.append(new Option(name, name));
+  select.value = state.me;
+  $('me-row').hidden = !state.chats.length;
+}
+
+function setChats(chats) {
+  state.chats = chats.sort((x, y) => y.last.date - x.last.date);
+  setupMe();
+  route();
+}
+
+// ---------- Picking a local folder ----------
+
+async function useLocal(getEntries) {
+  $('header').replaceChildren();
+  $('messages').replaceChildren(el('div', 'placeholder', 'Reading the folder…'));
+  let chats = [];
+  try { chats = await loadLocal(await getEntries()); } catch (err) { console.error(err); }
+  if (chats.length) setChats(chats);
+  else openChat(null, 'No WhatsApp chats were found there. Pick a folder that contains exported chat folders, or a single chat folder with its .txt file.');
+}
+
+async function pickFolder() {
+  if (window.showDirectoryPicker) {
+    try {
+      const handle = await window.showDirectoryPicker({ id: 'wa-chats', mode: 'read' });
+      state.savedHandle = handle;
+      saveHandle(handle);
+      return useLocal(() => walkHandle(handle));
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      console.error(err);
+    }
+  }
+  $('picker').click();
+}
+
+async function reopenFolder() {
+  const handle = state.savedHandle;
+  if ((await handle.requestPermission({ mode: 'read' })) !== 'granted') return;
+  useLocal(() => walkHandle(handle));
+}
+
+$('open-folder').addEventListener('click', pickFolder);
+
+$('picker').addEventListener('change', (e) => {
+  const picked = [...e.target.files];
+  e.target.value = '';
+  if (picked.length) useLocal(async () => picked.map((file) => ({ path: (file.webkitRelativePath || file.name).split('/'), file })));
+});
+
+window.addEventListener('dragover', (e) => { e.preventDefault(); document.body.classList.add('dragging'); });
+window.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.body.classList.remove('dragging');
+  // Entries must be taken from the event before any await.
+  const roots = [...e.dataTransfer.items].map((item) => item.webkitGetAsEntry && item.webkitGetAsEntry()).filter(Boolean);
+  if (roots.length) useLocal(async () => (await Promise.all(roots.map((root) => walkEntry(root)))).flat());
+});
+
+$('me').addEventListener('change', (e) => {
+  state.me = e.target.value;
+  try { localStorage.setItem('wa-viewer-me', state.me); } catch { /* storage unavailable */ }
+  openChat(state.current);
+});
+
+// ---------- Startup ----------
+
+async function init() {
+  window.addEventListener('hashchange', route);
+  let chats = [];
+  // Served over HTTP, look for chat folders next to the page, or under ?dir=<subfolder>.
+  if (location.protocol !== 'file:') {
+    const here = new URL('.', location.href);
+    const sub = new URLSearchParams(location.search).get('dir');
+    let root = new URL(sub ? sub.replace(/\/*$/, '/') : '.', location.href);
+    if (root.origin !== location.origin) root = here;
+    try {
+      const dirs = await serverDirs(root.href);
+      chats = (await Promise.all(dirs.map((d) => loadChat(d).catch(() => null)))).filter(Boolean);
+    } catch (err) {
+      console.error(err);
+    }
+    if (!chats.length) {
+      state.hasSamples = await fetch(here.href + 'samples/manifest.json')
+        .then((res) => res.ok && /json/.test(res.headers.get('content-type') || ''), () => false);
+    }
+  }
+  if (window.showDirectoryPicker) state.savedHandle = await loadHandle();
+  setChats(chats);
+}
+
+// Keep the view at the bottom until the user scrolls on their own.
+const box = $('messages');
+const repin = () => { if (state.pinned) box.scrollTop = box.scrollHeight; };
+box.addEventListener('load', repin, true);
+box.addEventListener('loadedmetadata', repin, true);
+for (const type of ['wheel', 'touchstart', 'mousedown', 'keydown']) {
+  box.addEventListener(type, () => { state.pinned = false; }, { passive: true });
+}
+
+const lightbox = $('lightbox');
+box.addEventListener('click', (e) => {
+  const img = e.target.closest('.media img');
+  if (!img || img.closest('.sticker')) return;
+  lightbox.firstElementChild.src = img.src;
+  lightbox.showModal();
+});
+lightbox.addEventListener('click', () => lightbox.close());
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# Test dependency (npm install --no-save puppeteer-core)
+node_modules/
+
+# Real chat exports kept next to the page. The fictional ones in samples/ are not matched.
+/WhatsApp Chat*/
+/chats/
